@@ -9,7 +9,7 @@ Control DJI Tello drone with python
 # Examples
 
 
-from tello-python import tello
+from tello_python import tello
 
 drone = tello.Tello()
 

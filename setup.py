@@ -5,7 +5,7 @@ with open('README.md', 'r') as fh:
 
 setuptools.setup(
     name='tello-python',
-    version='1.0.0',
+    version='1.0.1',
     author='C灵C',
     author_email='c0c@cocpy.com',
     description='Control DJI Tello drone with Python 3',
