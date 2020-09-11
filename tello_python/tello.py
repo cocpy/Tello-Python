@@ -29,6 +29,7 @@ class Tello:
 
         # 本项目运行时选项
         self.stream_state = False
+        self.camera_state = False
         self.MAX_TIME_OUT = 15.0
         self.debug = debug
 
@@ -82,9 +83,10 @@ class Tello:
                 break
             
             # 如果按F1键，截图到当前位置
-            if k == 0:
+            if k == 0 or self.camera_state:
                 png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
                 cv2.imwrite(png_name, frame)
+                self.camera_state = False
         cap.release()
         cv2.destroyAllWindows()
 
@@ -100,6 +102,10 @@ class Tello:
 
     def get_log(self):
         return self.log
+
+    def take_picture(self):
+        """拍照"""
+        self.camera_state = True
 
     # 以下命令强烈建议配合官方SDK食用
     # https://www.ryzerobotics.com/cn/tello/downloads
