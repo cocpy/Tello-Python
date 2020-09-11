@@ -1,6 +1,7 @@
 import socket
 import threading
 import time
+import datetime
 
 import cv2
 
@@ -42,7 +43,7 @@ class Tello:
         self.socket.sendto(command.encode('utf-8'), self.te_address)
         # 显示确认消息
         if self.debug is True:
-            print('Sending command: {}'.format(command))
+            print('发送命令: {}'.format(command))
 
         # 检查命令是否超时（基于MAX_TIME_OUT中的值）
         start = time.time()
@@ -50,12 +51,12 @@ class Tello:
             now = time.time()
             difference = now - start
             if difference > self.MAX_TIME_OUT:
-                print('Connection timed out!')
+                print('连接超时!')
                 break
 
         # 打印出无人机响应
         if self.debug is True and query is False:
-            print('Response: {}'.format(self.log[-1].get_response()))
+            print('响应: {}'.format(self.log[-1].get_response()))
 
     def _receive_thread(self):
         while True:
@@ -64,7 +65,7 @@ class Tello:
                 self.response, ip = self.socket.recvfrom(1024)
                 self.log[-1].add_response(self.response)
             except socket.error as exc:
-                print('Socket error: {}'.format(exc))
+                print('错误: {}'.format(exc))
 
     def _video_thread(self):
         # 创建流捕获对象
@@ -74,17 +75,24 @@ class Tello:
             ret, frame = cap.read()
             cv2.imshow('DJI Tello', frame)
 
-            # 如果按Esc键，视频流关闭
             k = cv2.waitKey(1) & 0xFF
+
+            # 如果按Esc键，视频流关闭
             if k == 27:
                 break
+            
+            # 如果按F1键，截图到当前位置
+            if k == 0:
+                str_now = datetime.datetime.now().strftime('%Y.%m.%d-%H:%M:%S')
+                png_name = str_now + '.png'
+                cv2.imwrite(png_name, frame)
         cap.release()
         cv2.destroyAllWindows()
 
     def wait(self, delay: float):
         # 显示等待消息
         if self.debug is True:
-            print('Waiting {} seconds...'.format(delay))
+            print('等待 {} 秒...'.format(delay))
 
         # 日志条目增加了延迟
         self.log.append(Stats('wait', len(self.log)))
@@ -289,31 +297,31 @@ class Tello:
         return self.log[-1].get_response()
 
     def get_height(self):
-        """获取高度"""
+        """获取高度，新版本中已停用"""
         self.send_command('height?', True)
         return self.log[-1].get_response()
 
     def get_temp(self):
-        """获取温度"""
+        """获取温度，新版本中已停用"""
         self.send_command('temp?', True)
         return self.log[-1].get_response()
 
     def get_attitude(self):
-        """获取飞行姿态"""
+        """获取飞行姿态，新版本中已停用"""
         self.send_command('attitude?', True)
         return self.log[-1].get_response()
 
     def get_baro(self):
-        """获取压力"""
+        """获取压力，新版本中已停用"""
         self.send_command('baro?', True)
         return self.log[-1].get_response()
 
     def get_acceleration(self):
-        """获取加速度"""
+        """获取加速度，新版本中已停用"""
         self.send_command('acceleration?', True)
         return self.log[-1].get_response()
 
     def get_tof(self):
-        """获取飞行时间"""
+        """获取飞行时间，新版本中已停用"""
         self.send_command('tof?', True)
         return self.log[-1].get_response()
