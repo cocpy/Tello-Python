@@ -83,8 +83,7 @@ class Tello:
             
             # 如果按F1键，截图到当前位置
             if k == 0:
-                str_now = datetime.datetime.now().strftime('%Y.%m.%d-%H:%M:%S')
-                png_name = str_now + '.png'
+                png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
                 cv2.imwrite(png_name, frame)
         cap.release()
         cv2.destroyAllWindows()
