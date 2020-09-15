@@ -4,6 +4,7 @@ import time
 import datetime
 
 import cv2
+import numpy as np
 
 from .stats import Stats
 
@@ -30,6 +31,8 @@ class Tello:
         # 本项目运行时选项
         self.stream_state = False
         self.camera_state = False
+        self.color_state = False
+        self.now_color = 0
         self.MAX_TIME_OUT = 15.0
         self.debug = debug
 
@@ -44,7 +47,7 @@ class Tello:
         self.socket.sendto(command.encode('utf-8'), self.te_address)
         # 显示确认消息
         if self.debug is True:
-            print('发送命令: {}'.format(command))
+            print('Send Command: {}'.format(command))
 
         # 检查命令是否超时（基于MAX_TIME_OUT中的值）
         start = time.time()
@@ -52,12 +55,12 @@ class Tello:
             now = time.time()
             difference = now - start
             if difference > self.MAX_TIME_OUT:
-                print('连接超时!')
+                print('Connect Time Out!')
                 break
 
         # 打印出无人机响应
         if self.debug is True and query is False:
-            print('响应: {}'.format(self.log[-1].get_response()))
+            print('Response: {}'.format(self.log[-1].get_response()))
 
     def _receive_thread(self):
         while True:
@@ -66,11 +69,11 @@ class Tello:
                 self.response, ip = self.socket.recvfrom(1024)
                 self.log[-1].add_response(self.response)
             except socket.error as exc:
-                print('错误: {}'.format(exc))
+                print('Error: {}'.format(exc))
 
     def _video_thread(self):
         # 创建流捕获对象
-        cap = cv2.VideoCapture('udp://'+self.te_ip+':11111')
+        cap = cv2.VideoCapture('udp://' + self.te_ip + ':11111')
 
         while self.stream_state:
             ret, frame = cap.read()
@@ -81,24 +84,63 @@ class Tello:
             # 如果按Esc键，视频流关闭
             if k == 27:
                 break
-            
+
             # 如果按F1键，截图到当前位置
             if k == 0 or self.camera_state:
                 png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
                 cv2.imwrite(png_name, frame)
                 self.camera_state = False
+
+            # 识别当前颜色
+            if self.color_state:
+                self.detect_color(frame)
+                self.color_state = False
+
         cap.release()
         cv2.destroyAllWindows()
 
     def wait(self, delay: float):
         # 显示等待消息
         if self.debug is True:
-            print('等待 {} 秒...'.format(delay))
+            print('Wait {} Seconds...'.format(delay))
 
         # 日志条目增加了延迟
         self.log.append(Stats('wait', len(self.log)))
         # 延迟激活
         time.sleep(delay)
+
+    def detect_color(self, frame):
+        # frame = cv2.imread("test.jpg")
+        hue_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        low_red_range1 = np.array([110, 43, 0])
+        high_red_range1 = np.array([180, 255, 255])
+        threhold_red1 = cv2.inRange(hue_image, low_red_range1, high_red_range1)
+        res_red1 = cv2.bitwise_and(frame, frame, mask=threhold_red1)
+
+        low_red_range2 = np.array([0, 43, 0])
+        high_red_range2 = np.array([10, 255, 255])
+        threhold_red2 = cv2.inRange(hue_image, low_red_range2, high_red_range2)
+        res_red2 = cv2.bitwise_and(frame, frame, mask=threhold_red2)
+
+        threhold_red = threhold_red1 + threhold_red2
+        res_red = res_red1 + res_red2
+
+        low_green_range = np.array([35, 43, 46])
+        high_green_range = np.array([77, 255, 255])
+        threhold_green = cv2.inRange(hue_image, low_green_range, high_green_range)
+        res_green = cv2.bitwise_and(frame, frame, mask=threhold_green)
+
+        res = res_red + res_green
+        if (cv2.countNonZero(threhold_green) > 0.5 * np.size(threhold_green)):
+            self.now_color = 'green'
+        elif ((cv2.countNonZero(threhold_red) > 0.5 * np.size(threhold_red)) & (
+                cv2.countNonZero(threhold_red) < 0.7 * np.size(threhold_red))):
+            self.now_color = 'red'
+        else:
+            self.now_color = 'none'
+            # color = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        return self.now_color, res
 
     def get_log(self):
         return self.log
@@ -106,6 +148,12 @@ class Tello:
     def take_picture(self):
         """拍照"""
         self.camera_state = True
+
+    def identify_color(self):
+        """识别当前颜色(红色或绿色)"""
+        self.color_state = True
+        time.sleep(0.5)
+        return self.now_color
 
     # 以下命令强烈建议配合官方SDK食用
     # https://www.ryzerobotics.com/cn/tello/downloads
@@ -199,19 +247,20 @@ class Tello:
         x、y、z 不能同时在 -20 ~ 20 之间"""
         self.send_command('curve {} {} {} {} {} {} {}'.format(x1, y1, z1, x2, y2, z2, speed))
 
-    def go_mid(self, x: int, y: int, z: int, speed: int):
+    def go_mid(self, x: int, y: int, z: int, speed: int, mid: str):
         """以设置速度speed（m/s）飞往设置 id 的挑战卡坐标系的（x,y,z）坐标点
-            mid: m1/m2/~/m8
-            m-1: 无人机内部算法最快识别到的挑战卡
-            m-2: 距离无人机最近的挑战卡
+            mid:
+                m1/m2/~/m8：对应挑战卡上的挑战卡ID
+                m-1: 无人机内部算法最快识别到的挑战卡，随机选择一个探测到的挑战卡
+                m-2: 距离无人机中心距离最近的挑战卡
             x: -500 - 500
             y: -500 - 500
             z: 0 - 500
             speed: 10-100 (cm/s)
         x、y、z 不能同时在 -20 ~ 20 之间"""
-        self.send_command('go {} {} {} {} mid'.format(x, y, z, speed))
+        self.send_command('go {} {} {} {} {}'.format(x, y, z, speed, mid))
 
-    def curve_mid(self, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, speed: int):
+    def curve_mid(self, x1: int, y1: int, z1: int, x2: int, y2: int, z2: int, speed: int, mid: str):
         """以设置速度speed（ cm/s ）飞弧线，经过设置 mid 的挑战卡坐标系中的（x1,y1,z1）点到（x2,y2,z2）点
         如果弧线半径不在 0.5-10 米范围内，则返回相应提醒
             x1, x2: -500 - 500
@@ -219,12 +268,12 @@ class Tello:
             z1, z2: 0 - 500
             speed: 10-60
         x、y、z 不能同时在 -20 ~ 20 之间"""
-        self.send_command('curve {} {} {} {} {} {} {}'.format(x1, y1, z1, x2, y2, z2, speed))
+        self.send_command('curve {} {} {} {} {} {} {} {}'.format(x1, y1, z1, x2, y2, z2, speed, mid))
 
-    def jump_mid(self, x: int, y: int, z: int, speed: int, yaw: int):
+    def jump_mid(self, x: int, y: int, z: int, speed: int, yaw: int, mid1: str, mid2: str):
         """飞往 mid1 坐标系的（x,y,z）点后悬停，识别 mid2 的挑战卡
         并在 mid2 坐标系下 (0,0,z) 的位置并旋转向到设置的 偏航yaw 值，( z>0 )"""
-        self.send_command('jump {} {} {} {} {} mid1 mid2'.format(x, y, z, speed, yaw))
+        self.send_command('jump {} {} {} {} {} {} {}'.format(x, y, z, speed, yaw, mid1, mid2))
 
     # 设置命令
     def set_speed(self, speed: int):
