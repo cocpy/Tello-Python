@@ -1,4 +1,4 @@
-from tello_python import tello
+from tello import tello
 
 
 drone = tello.Tello()

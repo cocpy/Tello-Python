@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from .stats import Stats
+from .frame2html import VideoCamera, run_app
 
 
 class Tello:
@@ -32,6 +33,8 @@ class Tello:
         self.stream_state = False
         self.camera_state = False
         self.color_state = False
+        self.video_state = False
+        self.save_state = False
         self.now_color = 0
         self.MAX_TIME_OUT = 15.0
         self.debug = debug
@@ -96,6 +99,16 @@ class Tello:
                 self.detect_color(frame)
                 self.color_state = False
 
+            # 将视频流发送至http
+            if self.video_state:
+                self.video_http(frame)
+                self.video_state = False
+
+            # 保存视频流至本地
+            if self.save_state:
+                self.video_save(frame)
+                self.save_state = False
+
         cap.release()
         cv2.destroyAllWindows()
 
@@ -141,6 +154,19 @@ class Tello:
             self.now_color = 'none'
             # color = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
         return self.now_color, res
+
+    @staticmethod
+    def video_http(frame):
+        vc = VideoCamera(frame)
+        run_app()
+
+    @staticmethod
+    def video_save(frame):
+        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        out = cv2.VideoWriter('output.avi', fourcc, 20.0, (640, 480))
+        frame = cv2.flip(frame, 0)
+        # write the flipped frame
+        out.write(frame)
 
     def get_log(self):
         return self.log
