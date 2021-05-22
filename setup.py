@@ -5,16 +5,16 @@ with open('README.md', 'r', encoding='utf-8') as fh:
 
 setuptools.setup(
     name='tello-python',
-    version='1.1.1',
+    version='1.1.3',
     author='C灵C',
     author_email='c0c@cocpy.com',
-    description='Control DJI Tello drone with Python 3',
+    description='Control DJI Tello drone with Python3',
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/cocpy/Tello-Python',
     packages=setuptools.find_packages(),
     install_requires=[
-        'opencv-python'
+        'opencv-python', 'flask'
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
