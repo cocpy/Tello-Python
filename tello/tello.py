@@ -38,6 +38,8 @@ class Tello:
         self.now_color = 0
         self.MAX_TIME_OUT = 15.0
         self.debug = debug
+        self.width = 980
+        self.height = 720
 
         # 将无人机设置为命令模式
         self.command()
@@ -80,7 +82,8 @@ class Tello:
 
         while self.stream_state:
             ret, frame = cap.read()
-            cv2.imshow('DJI Tello', frame)
+            re_frame = cv2.resize(frame, (self.width, self.height))
+            cv2.imshow('DJI Tello', re_frame)
 
             k = cv2.waitKey(1) & 0xFF
 
@@ -197,10 +200,12 @@ class Tello:
         """自动降落"""
         self.send_command('land')
 
-    def streamon(self):
+    def streamon(self, width=980, height=720):
         """打开视频流"""
         self.send_command('streamon')
         self.stream_state = True
+        self.width = width
+        self.height = height
         self.video_thread = threading.Thread(target=self._video_thread)
         self.video_thread.daemon = True
         self.video_thread.start()
