@@ -1,4 +1,5 @@
 import socket
+import queue
 import threading
 import time
 import datetime
@@ -8,6 +9,10 @@ import numpy as np
 
 from .stats import Stats
 from .frame2html import VideoCamera, run_app
+
+
+q = queue.Queue(maxsize=0)
+q.queue.clear()
 
 
 class Tello:
@@ -76,8 +81,66 @@ class Tello:
             except socket.error as exc:
                 print('Error: {}'.format(exc))
 
+    def _cap_video_thread(self):
+        # 捕获视频流
+        cap = cv2.VideoCapture('udp://' + self.te_ip + ':11111')
+        while self.stream_state:
+            ret, frame = cap.read()
+            while ret:
+                ret, frame = cap.read()
+                q.put(frame)
+        cap.release()
+
+    def _show_video_thread(self):
+        # 显示视频流
+        while True:
+            if q.empty() != True:
+                frame = q.get()
+                re_frame = cv2.resize(frame, (self.width, self.height))
+                cv2.imshow("DJI Tello", re_frame)
+
+            k = cv2.waitKey(1) & 0xFF
+            # 如果按Esc键，视频流关闭
+            if k == 27:
+                break
+
+        cv2.destroyAllWindows()
+
+    def _service_video_thread(self):
+        while True:
+            # k = cv2.waitKey(1) & 0xFF
+            # 如果按F1键，截图到当前位置
+            # if k == 0 or self.camera_state:
+            if self.camera_state:
+                if q.empty() != True:
+                    png_frame = q.get()
+                    png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
+                    cv2.imwrite(png_name, png_frame)
+                self.camera_state = False
+
+            # 识别当前颜色
+            if self.color_state:
+                if q.empty() != True:
+                    frame = q.get()
+                    self.detect_color(frame)
+                self.color_state = False
+
+            # 将视频流发送至http
+            if self.video_state:
+                if q.empty() != True:
+                    frame = q.get()
+                    self.video_http(frame)
+                self.video_state = False
+
+            # 保存视频流至本地
+            if self.save_state:
+                if q.empty() != True:
+                    frame = q.get()
+                    self.video_save(frame)
+                self.save_state = False
+
     def _video_thread(self):
-        # 创建流捕获对象
+        # 创建流捕获对象（该方法已被拆分为三个方法，计划删除）
         cap = cv2.VideoCapture('udp://' + self.te_ip + ':11111')
 
         while self.stream_state:
@@ -206,9 +269,19 @@ class Tello:
         self.stream_state = True
         self.width = width
         self.height = height
-        self.video_thread = threading.Thread(target=self._video_thread)
-        self.video_thread.daemon = True
-        self.video_thread.start()
+        # self.video_thread = threading.Thread(target=self._video_thread)
+        # self.video_thread.daemon = True
+        # self.video_thread.start()
+        self.cap_video_thread = threading.Thread(target=self._cap_video_thread)
+        self.cap_video_thread.daemon = True
+
+        self.show_video_thread = threading.Thread(target=self._show_video_thread)
+        self.show_video_thread.daemon = True
+        # self.service_video_thread = threading.Thread(target=self._service_video_thread)
+        # self.service_video_thread.daemon = True
+        self.cap_video_thread.start()
+        self.show_video_thread.start()
+        # self.service_video_thread.start()
 
     def streamoff(self):
         """关闭视频流"""
