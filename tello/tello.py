@@ -1,3 +1,4 @@
+import os
 import socket
 import queue
 import threading
@@ -6,13 +7,16 @@ import datetime
 
 import cv2
 import numpy as np
+import paddlehub as hub
+from PIL import Image
 
 from .stats import Stats
 from .frame2html import VideoCamera, run_app
 
+q = queue.Queue()
 
-q = queue.Queue(maxsize=0)
-q.queue.clear()
+
+# q.queue.clear()
 
 
 class Tello:
@@ -28,6 +32,12 @@ class Tello:
         self.te_port = 8889
         self.te_address = (self.te_ip, self.te_port)
         self.log = []
+        self.picture_path = ''
+        self.file_path = ''
+        self.frame = None
+
+        # 加载动物识别模型
+        self.module = hub.Module(name="resnet50_vd_animals")
 
         # 初始化响应线程
         self.receive_thread = threading.Thread(target=self._receive_thread)
@@ -40,11 +50,12 @@ class Tello:
         self.color_state = False
         self.video_state = False
         self.save_state = False
+        self.picture_state = False
+        self.animal_state = False
+        self.flip_frame = False
         self.now_color = 0
         self.MAX_TIME_OUT = 15.0
         self.debug = debug
-        self.width = 980
-        self.height = 720
 
         # 将无人机设置为命令模式
         self.command()
@@ -82,101 +93,70 @@ class Tello:
                 print('Error: {}'.format(exc))
 
     def _cap_video_thread(self):
-        # 捕获视频流
+        # 创建流捕获对象
         cap = cv2.VideoCapture('udp://' + self.te_ip + ':11111')
+        # cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
         while self.stream_state:
             ret, frame = cap.read()
             while ret:
                 ret, frame = cap.read()
+                if self.flip_frame:
+                    frame = cv2.flip(frame, 0)
+                cv2.imshow("DJI Tello", frame)
                 q.put(frame)
+                k = cv2.waitKey(1) & 0xFF
+                # 如果按Esc键，视频流关闭
+                if k == 27:
+                    break
         cap.release()
-
-    def _show_video_thread(self):
-        # 显示视频流
-        while True:
-            if q.empty() != True:
-                frame = q.get()
-                re_frame = cv2.resize(frame, (self.width, self.height))
-                cv2.imshow("DJI Tello", re_frame)
-
-            k = cv2.waitKey(1) & 0xFF
-            # 如果按Esc键，视频流关闭
-            if k == 27:
-                break
-
         cv2.destroyAllWindows()
 
     def _service_video_thread(self):
         while True:
+            self.frame = q.get()
             # k = cv2.waitKey(1) & 0xFF
             # 如果按F1键，截图到当前位置
             # if k == 0 or self.camera_state:
             if self.camera_state:
-                if q.empty() != True:
-                    png_frame = q.get()
-                    png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
-                    cv2.imwrite(png_name, png_frame)
+                self.file_path = self.picture_path + '\\' + datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
+                print('图片路径为：', self.file_path)
+                try:
+                    cv2.imwrite(self.file_path, self.frame)
+                except Exception as e:
+                    print('保存图片失败')
                 self.camera_state = False
+
+            # 识别动物
+            if self.animal_state:
+                results = self.module.classification(images=[self.frame])
+                # print(results)
+                key_value_list = list(results[0].items())
+                key_first, value_first = key_value_list[0][0], key_value_list[0][1]
+                if '非动物' != key_first:
+                    # print('检测结果是：', key_first, '，相似度为：', value_first)
+                    cv2.imshow(key_first, self.frame)
+                    self.animal_state = False
+
+            # 显示照片
+            if self.picture_state:
+                file = self.file_path
+                f = Image.open(file).show()
+                self.picture_state = False
 
             # 识别当前颜色
             if self.color_state:
-                if q.empty() != True:
-                    frame = q.get()
-                    self.detect_color(frame)
+                self.detect_color(self.frame)
                 self.color_state = False
 
             # 将视频流发送至http
             if self.video_state:
-                if q.empty() != True:
-                    frame = q.get()
-                    self.video_http(frame)
+                self.video_http(self.frame)
                 self.video_state = False
 
             # 保存视频流至本地
             if self.save_state:
-                if q.empty() != True:
-                    frame = q.get()
-                    self.video_save(frame)
+                self.video_save(self.frame)
                 self.save_state = False
-
-    def _video_thread(self):
-        # 创建流捕获对象（该方法已被拆分为三个方法，计划删除）
-        cap = cv2.VideoCapture('udp://' + self.te_ip + ':11111')
-
-        while self.stream_state:
-            ret, frame = cap.read()
-            re_frame = cv2.resize(frame, (self.width, self.height))
-            cv2.imshow('DJI Tello', re_frame)
-
-            k = cv2.waitKey(1) & 0xFF
-
-            # 如果按Esc键，视频流关闭
-            if k == 27:
-                break
-
-            # 如果按F1键，截图到当前位置
-            if k == 0 or self.camera_state:
-                png_name = datetime.datetime.now().strftime('%Y%m%d_%H%M%S') + '.png'
-                cv2.imwrite(png_name, frame)
-                self.camera_state = False
-
-            # 识别当前颜色
-            if self.color_state:
-                self.detect_color(frame)
-                self.color_state = False
-
-            # 将视频流发送至http
-            if self.video_state:
-                self.video_http(frame)
-                self.video_state = False
-
-            # 保存视频流至本地
-            if self.save_state:
-                self.video_save(frame)
-                self.save_state = False
-
-        cap.release()
-        cv2.destroyAllWindows()
 
     def wait(self, delay: float):
         # 显示等待消息
@@ -188,39 +168,6 @@ class Tello:
         # 延迟激活
         time.sleep(delay)
 
-    def detect_color(self, frame):
-        # frame = cv2.imread("test.jpg")
-        hue_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        low_red_range1 = np.array([110, 43, 0])
-        high_red_range1 = np.array([180, 255, 255])
-        threhold_red1 = cv2.inRange(hue_image, low_red_range1, high_red_range1)
-        res_red1 = cv2.bitwise_and(frame, frame, mask=threhold_red1)
-
-        low_red_range2 = np.array([0, 43, 0])
-        high_red_range2 = np.array([10, 255, 255])
-        threhold_red2 = cv2.inRange(hue_image, low_red_range2, high_red_range2)
-        res_red2 = cv2.bitwise_and(frame, frame, mask=threhold_red2)
-
-        threhold_red = threhold_red1 + threhold_red2
-        res_red = res_red1 + res_red2
-
-        low_green_range = np.array([35, 43, 46])
-        high_green_range = np.array([77, 255, 255])
-        threhold_green = cv2.inRange(hue_image, low_green_range, high_green_range)
-        res_green = cv2.bitwise_and(frame, frame, mask=threhold_green)
-
-        res = res_red + res_green
-        if (cv2.countNonZero(threhold_green) > 0.5 * np.size(threhold_green)):
-            self.now_color = 'green'
-        elif ((cv2.countNonZero(threhold_red) > 0.5 * np.size(threhold_red)) & (
-                cv2.countNonZero(threhold_red) < 0.7 * np.size(threhold_red))):
-            self.now_color = 'red'
-        else:
-            self.now_color = 'none'
-            # color = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-        return self.now_color, res
-
     @staticmethod
     def video_http(frame):
         vc = VideoCamera(frame)
@@ -228,8 +175,8 @@ class Tello:
 
     @staticmethod
     def video_save(frame):
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        out = cv2.VideoWriter('output.avi', fourcc, 20.0, (640, 480))
+        force = cv2.VideoWriter_fourcc(*'XVID')
+        out = cv2.VideoWriter('output.avi', force, 20.0, (640, 480))
         frame = cv2.flip(frame, 0)
         # write the flipped frame
         out.write(frame)
@@ -237,9 +184,22 @@ class Tello:
     def get_log(self):
         return self.log
 
-    def take_picture(self):
+    def take_picture(self, path=os.getcwd()):
         """拍照"""
         self.camera_state = True
+        self.picture_path = path
+
+    def show_picture(self):
+        """显示照片"""
+        self.picture_state = True
+
+    def flip_video(self):
+        """翻转视频，在加装下视镜片的情况下开启"""
+        self.flip_frame = True
+
+    def identify_animal(self):
+        """识别动物"""
+        self.animal_state = True
 
     def identify_color(self):
         """识别当前颜色(红色或绿色)"""
@@ -263,30 +223,59 @@ class Tello:
         """自动降落"""
         self.send_command('land')
 
-    def streamon(self, width=980, height=720):
+    def streamon(self):
         """打开视频流"""
         self.send_command('streamon')
         self.stream_state = True
-        self.width = width
-        self.height = height
-        # self.video_thread = threading.Thread(target=self._video_thread)
-        # self.video_thread.daemon = True
-        # self.video_thread.start()
+
         self.cap_video_thread = threading.Thread(target=self._cap_video_thread)
         self.cap_video_thread.daemon = True
-
-        self.show_video_thread = threading.Thread(target=self._show_video_thread)
-        self.show_video_thread.daemon = True
-        # self.service_video_thread = threading.Thread(target=self._service_video_thread)
-        # self.service_video_thread.daemon = True
         self.cap_video_thread.start()
-        self.show_video_thread.start()
-        # self.service_video_thread.start()
 
     def streamoff(self):
         """关闭视频流"""
         self.stream_state = False
         self.send_command('streamoff')
+
+    def stream_service_on(self):
+        """是否开启视频流附加功能，开启视频流会卡顿"""
+        self.service_video_thread = threading.Thread(target=self._service_video_thread)
+        self.service_video_thread.daemon = True
+        self.service_video_thread.start()
+
+    def detect_color(self, frame):
+        """颜色识别"""
+        # frame = cv2.imread("test.jpg")
+        hue_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        low_red_range1 = np.array([110, 43, 0])
+        high_red_range1 = np.array([180, 255, 255])
+        threshold_red1 = cv2.inRange(hue_image, low_red_range1, high_red_range1)
+        res_red1 = cv2.bitwise_and(frame, frame, mask=threshold_red1)
+
+        low_red_range2 = np.array([0, 43, 0])
+        high_red_range2 = np.array([10, 255, 255])
+        threshold_red2 = cv2.inRange(hue_image, low_red_range2, high_red_range2)
+        res_red2 = cv2.bitwise_and(frame, frame, mask=threshold_red2)
+
+        threshold_red = threshold_red1 + threshold_red2
+        res_red = res_red1 + res_red2
+
+        low_green_range = np.array([35, 43, 46])
+        high_green_range = np.array([77, 255, 255])
+        threshold_green = cv2.inRange(hue_image, low_green_range, high_green_range)
+        res_green = cv2.bitwise_and(frame, frame, mask=threshold_green)
+
+        res = res_red + res_green
+        if cv2.countNonZero(threshold_green) > 0.5 * np.size(threshold_green):
+            self.now_color = 'green'
+        elif ((cv2.countNonZero(threshold_red) > 0.5 * np.size(threshold_red)) & (
+                cv2.countNonZero(threshold_red) < 0.7 * np.size(threshold_red))):
+            self.now_color = 'red'
+        else:
+            self.now_color = 'none'
+            # color = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        return self.now_color, res
 
     def emergency(self):
         """停止电机转动"""
